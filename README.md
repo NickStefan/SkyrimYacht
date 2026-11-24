@@ -83,6 +83,22 @@ g++ -std=c++20 -O2 -o build/yacht_test tests/yacht_test.cpp src/sim/Yacht.cpp &&
 ./preview/build.sh   # needs clang with the wasm32 target and wasm-ld
 ```
 
+## Build (Linux)
+
+The plugin also builds on Linux with MSVC 14.51 run under Proton's Wine, from Python scripts (no CMake or vcpkg; the
+Windows build above is unchanged). It links the prebuilt CommonLibSSE-NG v15.7.0 bundle instead of the submodule.
+
+```
+python3 tools/fetch_toolchain.py                                # once: MSVC, Windows SDK, CommonLib bundle (~2.5 GB)
+python3 tools/fetch_toolchain.py --reuse ../../SkiingInSkyrim   # or: link them from a workspace that has them
+python3 tools/build.py                                          # build/package/Data, laid out as CI's package
+python3 tools/build.py clean
+```
+
+Everything lands in `deps/`, `toolchain/` and `build/` (git-ignored), with its own Wine prefix in `build/wine` and
+drive `S:` mapped to the repo. Wine comes from `~/.local/share/Steam/steamapps/common/Proton 10.0/files`; set
+`YACHT_PROTON` or `YACHT_WINE` to use another. The version is read from `project()` in `CMakeLists.txt`.
+
 ## The game's own cups (local only)
 
 `tools/nif2json.py` reads Skyrim SE meshes (BSTriShape) and `tools/make_local_cups.py` turns a folder of the four

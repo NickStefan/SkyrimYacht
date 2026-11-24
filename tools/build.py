@@ -1,0 +1,284 @@
+#!/usr/bin/env python3
+"""Build SkyrimYacht.dll with MSVC under Wine and assemble build/package, laid out as CI's package.
+
+    python3 tools/build.py          build the plugin and assemble build/package/Data (DLL, PDB, ESP, INI, assets)
+    python3 tools/build.py clean    remove build outputs (keeps the Wine prefix and caches)
+
+Run tools/fetch_toolchain.py once first. Nothing is copied into the game. The Windows build (CMakeLists.txt, CI) is
+separate; this mirrors its compiler settings, sources and plugin declaration.
+"""
+import concurrent.futures
+import os
+from pathlib import Path
+import re
+import shutil
+import struct
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import fetch_toolchain as pins  # noqa: E402
+import wine_env  # noqa: E402
+
+ROOT = wine_env.ROOT
+BUILD = ROOT / 'build'
+OBJ = BUILD / 'obj'
+SRC = ROOT / 'src'
+PLUGIN = SRC / 'plugin'
+EXTERN = ROOT / 'extern'
+ASSETS = ROOT / 'assets'
+DEPS = ROOT / 'deps'
+MSVC = ROOT / 'toolchain/msvc/VC/Tools/MSVC' / pins.MSVC_VERSION
+KITS = ROOT / 'toolchain/msvc/Windows Kits/10'
+COMMONLIB = DEPS / 'commonlib-prebuilt'
+THIRD_PARTY = DEPS / 'src'
+IMGUI = THIRD_PARTY / 'imgui'
+NAME = 'SkyrimYacht'
+AUTHOR = 'evodube'
+JOBS = int(os.environ.get('JOBS', 4))
+
+DEFINES = [
+    'WINVER=0x0601', '_WIN32_WINNT=0x0601', 'NOMINMAX', 'WIN32_LEAN_AND_MEAN',
+    # The prebuilt CommonLib is compiled for all runtimes; this layout must match it.
+    'ENABLE_SKYRIM_SE=1', 'ENABLE_SKYRIM_AE=1', 'ENABLE_SKYRIM_VR=1', 'HAS_SKYRIM_MULTI_TARGETING=1',
+    'SPDLOG_COMPILED_LIB', 'SPDLOG_FMT_EXTERNAL',
+]
+# Same suppressions CommonLib's prebuilt target exports to consumers.
+DISABLED_WARNINGS = [4005, 4061, 4068, 4200, 4201, 4265, 4266, 4371, 4514, 4582, 4583, 4623, 4625,
+                     4626, 4702, 4710, 4711, 4820, 4996, 5026, 5027, 5045, 5053, 5204, 5220]
+SYSTEM_LIBS = ['advapi32.lib', 'bcrypt.lib', 'd3d11.lib', 'd3dcompiler.lib', 'dbghelp.lib', 'dxgi.lib',
+               'ole32.lib', 'version.lib', 'user32.lib', 'shell32.lib']
+# vcpkg's imgui port with the dx11-binding feature.
+IMGUI_SOURCES = ['imgui.cpp', 'imgui_demo.cpp', 'imgui_draw.cpp', 'imgui_tables.cpp', 'imgui_widgets.cpp',
+                 'backends/imgui_impl_dx11.cpp']
+# CMakeLists.txt: the physics and the Vorbis decoder compile without the PCH.
+NO_PCH = {SRC / 'sim/Dice.cpp', SRC / 'sim/Yacht.cpp', SRC / 'sim/Ai.cpp', PLUGIN / 'StbVorbis.cpp'}
+
+
+def sdk_version():
+    versions = sorted(p.name for p in (KITS / 'Include').glob(pins.SDK_VERSION + '.*'))
+    if not versions:
+        raise SystemExit('Windows SDK missing; run tools/fetch_toolchain.py')
+    return versions[-1]
+
+
+def tool_env():
+    sdk = sdk_version()
+    include = [MSVC / 'include', *(KITS / 'Include' / sdk / n for n in ('ucrt', 'shared', 'um', 'winrt'))]
+    lib = [MSVC / 'lib/x64', *(KITS / 'Lib' / sdk / n / 'x64' for n in ('ucrt', 'um'))]
+    return {'INCLUDE': ';'.join(map(wine_env.win, include)), 'LIB': ';'.join(map(wine_env.win, lib))}
+
+
+def msvc(tool, args):
+    result = wine_env.run(MSVC / 'bin/Hostx64/x64' / (tool + '.exe'), args, extra_env=tool_env())
+    if result.returncode != 0:
+        raise SystemExit(f'{tool} failed ({result.returncode})')
+
+
+def version():
+    """project(... VERSION x.y.z) in CMakeLists.txt, so both builds declare the same version."""
+    found = re.search(r'project\(\s*\w+\s+VERSION\s+(\d+)\.(\d+)\.(\d+)', (ROOT / 'CMakeLists.txt').read_text())
+    if not found:
+        raise SystemExit('No project(... VERSION x.y.z) in CMakeLists.txt')
+    return tuple(int(part) for part in found.groups())
+
+
+def base_flags(warnings='/W3'):
+    flags = ['/nologo', '/std:c++latest', '/EHsc', '/permissive-', '/Zc:preprocessor', '/utf-8', '/MD',
+             '/O2', '/Z7', '/bigobj', warnings, '/external:anglebrackets', '/external:W0', '/DNDEBUG']
+    flags += ['/D' + d for d in DEFINES]
+    flags += [f'/wd{w}' for w in DISABLED_WARNINGS]
+    includes = [PLUGIN, EXTERN / 'SKSEMenuFramework', EXTERN / 'stb',
+                COMMONLIB / 'include', COMMONLIB / 'extern/openvr/headers',
+                THIRD_PARTY / 'spdlog/include', THIRD_PARTY / 'fmt/include',
+                THIRD_PARTY / 'DirectXTK/Inc', THIRD_PARTY / 'DirectXMath/Inc',
+                IMGUI, IMGUI / 'backends']
+    return flags + ['/I' + wine_env.win(p) for p in includes]
+
+
+def stale(output, inputs):
+    if not output.exists():
+        return True
+    built = output.stat().st_mtime
+    return any(p.stat().st_mtime > built for p in inputs)
+
+
+def write_if_changed(path, text):
+    """Generated sources keep their timestamp when unchanged, so they don't force a rebuild."""
+    if not path.exists() or path.read_text() != text:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    return path
+
+
+def compile_all(jobs, warnings='/W3'):
+    """jobs: (source, object, extra flags, dependencies)."""
+    todo = [j for j in jobs if stale(j[1], [j[0], *j[3]])]
+
+    def one(job):
+        source, obj, extra, _ = job
+        obj.parent.mkdir(parents=True, exist_ok=True)
+        msvc('cl', base_flags(warnings) + extra + ['/c', '/Fo' + wine_env.win(obj), wine_env.win(source)])
+
+    with concurrent.futures.ThreadPoolExecutor(JOBS) as pool:
+        list(pool.map(one, todo))
+
+
+def build_dependencies():
+    """spdlog (compiled, external fmt) and fmt, as CommonLib's bundle was built against, plus Dear ImGui."""
+    library = OBJ / 'deps/yacht_deps.lib'
+    sources = [THIRD_PARTY / 'fmt/src/format.cc',
+               *(THIRD_PARTY / 'spdlog/src' / f for f in
+                 ('spdlog.cpp', 'stdout_sinks.cpp', 'color_sinks.cpp', 'file_sinks.cpp', 'async.cpp', 'cfg.cpp'))]
+    objects = [OBJ / 'deps' / (s.parent.parent.name + '_' + s.stem + '.obj') for s in sources]
+    imgui = [IMGUI / s for s in IMGUI_SOURCES]
+    sources += imgui
+    objects += [OBJ / 'deps' / ('imgui_' + s.stem + '.obj') for s in imgui]
+    compile_all([(s, o, [], []) for s, o in zip(sources, objects)], warnings='/W0')
+    if stale(library, objects):
+        msvc('lib', ['/nologo', '/OUT:' + wine_env.win(library), *map(wine_env.win, objects)])
+    return library
+
+
+def plugin_info():
+    """The SKSE declaration add_commonlibsse_plugin generates for CMakeLists.txt's target."""
+    major, minor, patch = version()
+    return write_if_changed(OBJ / 'generated/PluginInfo.cpp', (
+        '#include "REL/Relocation.h"\n'
+        '#include "SKSE/SKSE.h"\n'
+        '\n'
+        'SKSEPluginInfo(\n'
+        f'    .Version = REL::Version{{ {major}, {minor}, {patch}, 0 }},\n'
+        f'    .Name = "{NAME}"sv,\n'
+        f'    .Author = "{AUTHOR}"sv,\n'
+        '    .SupportEmail = ""sv,\n'
+        '    .StructCompatibility = SKSE::StructCompatibility::Independent,\n'
+        '    .RuntimeCompatibility = SKSE::VersionIndependence::AddressLibrary,\n'
+        '    .MinimumSKSEVersion = REL::Version{ 0, 0, 0, 0 }\n'
+        ')\n'))
+
+
+def build_plugin(dependencies):
+    headers = [*SRC.rglob('*.h'), *(EXTERN / 'SKSEMenuFramework').glob('*.h')]
+    pch_header = PLUGIN / 'PCH.h'
+    pch_source = write_if_changed(OBJ / 'generated/PCH.cpp', '#include "PCH.h"\n')
+    pch, pch_obj = OBJ / 'plugin/PCH.pch', OBJ / 'plugin/PCH.obj'
+    if stale(pch, [pch_header, pch_source]):
+        pch_obj.parent.mkdir(parents=True, exist_ok=True)
+        msvc('cl', base_flags() + ['/c', '/YcPCH.h', '/Fp' + wine_env.win(pch),
+                                   '/Fo' + wine_env.win(pch_obj), wine_env.win(pch_source)])
+    sources = sorted([*PLUGIN.glob('*.cpp'), *(SRC / 'sim').glob('*.cpp')])
+    use_pch = ['/YuPCH.h', '/FIPCH.h', '/Fp' + wine_env.win(pch)]
+    jobs = []
+    for s in sources:
+        obj = OBJ / 'plugin' / (s.relative_to(SRC).with_suffix('.obj').as_posix().replace('/', '_'))
+        if s in NO_PCH:
+            jobs.append((s, obj, [], headers))
+        else:
+            jobs.append((s, obj, use_pch, [*headers, pch]))
+    info = plugin_info()
+    jobs.append((info, OBJ / 'plugin/PluginInfo.obj', use_pch, [pch]))
+    compile_all(jobs)
+
+    dll, pdb = BUILD / (NAME + '.dll'), BUILD / (NAME + '.pdb')
+    inputs = [pch_obj, *(j[1] for j in jobs), dependencies, COMMONLIB / 'lib/CommonLibSSE.lib']
+    if stale(dll, inputs):
+        msvc('link', ['/NOLOGO', '/DLL', '/MACHINE:X64', '/DEBUG:FULL', '/OPT:REF', '/OPT:ICF',
+                      '/PDBALTPATH:' + NAME + '.pdb', '/OUT:' + wine_env.win(dll), '/PDB:' + wine_env.win(pdb),
+                      *map(wine_env.win, inputs), wine_env.win(COMMONLIB / 'lib/openvr_api.lib'), *SYSTEM_LIBS])
+    return dll, pdb
+
+
+def pe_tables(dll):
+    """(export names, imported DLL names) of a PE32+ image."""
+    data = dll.read_bytes()
+    pe = struct.unpack_from('<I', data, 0x3C)[0]
+    sections = struct.unpack_from('<H', data, pe + 6)[0]
+    optional_size = struct.unpack_from('<H', data, pe + 20)[0]
+    optional = pe + 24
+    export_rva, import_rva = (struct.unpack_from('<I', data, optional + 112 + 8 * i)[0] for i in range(2))
+    table = [struct.unpack_from('<8sIIII', data, optional + optional_size + 40 * i) for i in range(sections)]
+
+    def offset(rva):
+        for _, size, address, raw_size, raw in table:
+            if address <= rva < address + max(size, raw_size):
+                return raw + rva - address
+        raise ValueError(f'RVA {rva:#x} outside sections')
+
+    def string(rva):
+        start = offset(rva)
+        return data[start:data.index(b'\0', start)].decode()
+
+    exported = set()
+    if export_rva:
+        base = offset(export_rva)
+        count, names = struct.unpack_from('<II', data, base + 24)[0], struct.unpack_from('<I', data, base + 32)[0]
+        exported = {string(struct.unpack_from('<I', data, offset(names) + 4 * i)[0]) for i in range(count)}
+    imported = []
+    descriptor = offset(import_rva) if import_rva else None
+    while descriptor is not None:
+        name_rva = struct.unpack_from('<I', data, descriptor + 12)[0]
+        if name_rva == 0:
+            break
+        imported.append(string(name_rva))
+        descriptor += 20
+    return exported, imported
+
+
+def copy_files(pattern, folder):
+    folder.mkdir(parents=True, exist_ok=True)
+    for path in sorted(ASSETS.glob(pattern)):
+        if path.is_file():
+            shutil.copy2(path, folder)
+
+
+def package(dll, pdb):
+    """build.yml's Package step, with the PDB beside the DLL."""
+    exported, imported = pe_tables(dll)
+    missing = {'SKSEPlugin_Load', 'SKSEPlugin_Query', 'SKSEPlugin_Version'} - exported
+    if missing:
+        raise SystemExit(f'{dll.name} is missing SKSE exports: {sorted(missing)}')
+    # Only Skyrim VR ships these; a hard import would stop the plugin loading on SE/AE.
+    runtime_only = {'openvr_api.dll', 'steam_api64.dll'} & {name.lower() for name in imported}
+    if runtime_only:
+        raise SystemExit(f'{dll.name} hard-imports {sorted(runtime_only)}')
+    out = BUILD / 'package'
+    shutil.rmtree(out, ignore_errors=True)
+    data = out / 'Data'
+    plugins = data / 'SKSE/Plugins'
+    own = plugins / NAME
+    plugins.mkdir(parents=True)
+    shutil.copy2(dll, plugins)
+    shutil.copy2(pdb, plugins)
+    shutil.copy2(ROOT / 'SkyrimYacht.ini', plugins)
+    copy_files('game_sounds/*.wav', own / 'Sounds')
+    copy_files('fonts/*', own / 'Fonts')
+    copy_files('ui/*.rgba', own / 'UI')
+    copy_files('music/*', own / 'Music')
+    shutil.copy2(ROOT / 'SkyrimYacht.esp', data)
+    shutil.copytree(ASSETS / 'seq', data / 'Seq')
+    shutil.copytree(ASSETS / 'meshes', data / 'meshes')
+    shutil.copytree(ASSETS / 'textures', data / 'textures')
+    shutil.copy2(ROOT / 'LICENSE.txt', own)
+    shutil.copy2(ASSETS / 'download/README.txt', own)
+    print(f'{dll.name}: exports {", ".join(sorted(exported))}')
+    print(f'{dll.name}: imports {", ".join(imported)}')
+    print(f'Packaged {data.relative_to(ROOT)} (version {".".join(map(str, version()))})')
+
+
+def main():
+    if sys.argv[1:] == ['clean']:
+        for path in (OBJ, BUILD / 'package', BUILD / (NAME + '.dll'), BUILD / (NAME + '.pdb')):
+            shutil.rmtree(path, ignore_errors=True) if path.is_dir() else path.unlink(missing_ok=True)
+        return
+    if sys.argv[1:]:
+        raise SystemExit(__doc__)
+    if not (MSVC / 'bin/Hostx64/x64/cl.exe').exists() or not (COMMONLIB / 'lib/CommonLibSSE.lib').exists():
+        raise SystemExit('Toolchain missing; run tools/fetch_toolchain.py')
+    if not (IMGUI / 'imgui.cpp').exists():
+        raise SystemExit('Dear ImGui missing; run tools/fetch_toolchain.py')
+    wine_env.ensure_prefix()
+    package(*build_plugin(build_dependencies()))
+
+
+if __name__ == '__main__':
+    main()

@@ -1,4 +1,7 @@
 build/
+# the Linux build's toolchain and fetched sources (tools/fetch_toolchain.py)
+/deps/
+/toolchain/
 local-assets/
 preview/yacht-local.html
 __pycache__/
