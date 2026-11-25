@@ -72,6 +72,22 @@ int main()
 	Expect(zero.Fill(kFives, sixes), -1, "joker still forces the open sixes box after a scratched yacht");
 	Expect(zero.Fill(kSixes, sixes), 30, "no bonus after a scratched yacht");
 
+	Scorecard shorter;
+	shorter.closed = 1u << kChance;
+	Expect(shorter.Preview(kChance, junk), -1, "a closed box takes nothing");
+	Expect(shorter.Fill(kChance, junk), -1, "nor can it be filled");
+	Expect(shorter.Preview(kOnes, junk), 2, "the other boxes still take the roll");
+	shorter.Fill(kYacht, sixes);
+	shorter.Fill(kSixes, fours);
+	shorter.Fill(kThreeKind, junk);
+	shorter.Fill(kFourKind, junk);
+	shorter.Fill(kFullHouse, junk);
+	shorter.Fill(kSmallStraight, junk);
+	shorter.Fill(kLargeStraight, junk);
+	Expect(shorter.Preview(kOnes, sixes), 0, "joker goes upper once the open lower boxes are full (closed Chance aside)");
+	shorter.Clear();
+	Expect(shorter.Preview(kChance, junk), 16, "Clear opens every box again");
+
 	std::printf(g_failures ? "%d failure(s)\n" : "yacht tests passed\n", g_failures);
 	return g_failures ? 1 : 0;
 }

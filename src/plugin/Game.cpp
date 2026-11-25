@@ -753,6 +753,9 @@ namespace Game
 			g_cards[0].Clear();
 			g_cards[1].Clear();
 			g_rounds = Rounds();
+			if (g_rounds < yacht::kCategories) {  // Chance is for the whole card only
+				g_cards[0].closed = g_cards[1].closed = 1u << yacht::kChance;
+			}
 			g_outcome.clear();
 			g_confirmForfeit = false;
 			Scene::UseCup(0, PlayerCup().id);
@@ -2180,7 +2183,15 @@ namespace Game
                     for (float dx = ra.x + S(6); dx < rb.x; dx += S(3)) {
                         dl->AddRectFilled(ImVec2(dx, rb.y - S(2)), ImVec2(dx + 1, rb.y - S(1)), Alpha(kInkC, 0.35f * ink));
                     }
-                    Text(dl, F.book, ImVec2(ra.x + S(10), ra.y + (rowH - F.book->FontSize) * 0.5f), filled ? softC : inkC, yacht::CategoryName(cat));
+                    const ImVec2 np(ra.x + S(10), ra.y + (rowH - F.book->FontSize) * 0.5f);
+                    if (card.Closed(cat)) {  // not played in a short game: faded and struck out
+                        const ImU32 offC = Alpha(kInkC, 0.3f * ink);
+                        Text(dl, F.book, np, offC, yacht::CategoryName(cat));
+                        const float sy = ra.y + rowH * 0.5f + S(1);
+                        dl->AddLine(ImVec2(np.x - S(2), sy), ImVec2(np.x + Measure(F.book, yacht::CategoryName(cat), 0) + S(2), sy), offC, S(1.2f));
+                    } else {
+                        Text(dl, F.book, np, filled ? softC : inkC, yacht::CategoryName(cat));
+                    }
                     std::string val;
                     ImU32       vc = inkC;
                     if (filled) {

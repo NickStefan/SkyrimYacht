@@ -112,6 +112,7 @@ namespace yacht
 			b = -1;
 		}
 		yachtBonuses = 0;
+		closed = 0;
 	}
 
 	bool Scorecard::Full() const
@@ -131,7 +132,7 @@ namespace yacht
 
 	int Scorecard::Preview(int a_category, const int (&a_dice)[5]) const
 	{
-		if (a_category < 0 || a_category >= kCategories || Filled(a_category)) {
+		if (a_category < 0 || a_category >= kCategories || !Open(a_category)) {
 			return -1;
 		}
 		if (!Joker(a_dice)) {
@@ -160,7 +161,7 @@ namespace yacht
 		}
 		if (a_category <= kSixes) {
 			for (int c = kThreeKind; c < kCategories; ++c) {
-				if (c != kYacht && !Filled(c)) {
+				if (c != kYacht && Open(c)) {
 					return -1;
 				}
 			}

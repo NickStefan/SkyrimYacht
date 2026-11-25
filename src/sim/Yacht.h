@@ -35,19 +35,22 @@ namespace yacht
 
 	struct Scorecard
 	{
-		int boxes[kCategories];
-		int yachtBonuses{ 0 };
+		int          boxes[kCategories];
+		int          yachtBonuses{ 0 };
+		unsigned int closed{ 0 };  // bit c set: box c isn't played this game (a short game leaves Chance out)
 
 		Scorecard() { Clear(); }
-		void Clear();
+		void Clear();  // also opens every box
 
 		bool Filled(int a_category) const { return boxes[a_category] >= 0; }
+		bool Closed(int a_category) const { return (closed >> a_category) & 1u; }
+		bool Open(int a_category) const { return !Filled(a_category) && !Closed(a_category); }
 		bool Full() const;
 
 		// Whether a_dice is an extra five-of-a-kind that plays as a joker in the lower section.
 		bool Joker(const int (&a_dice)[5]) const;
 		// What writing a_dice into a_category would score, including the joker rule. -1 if the box can't be used
-		// (already filled, or the joker rule forces the matching upper box).
+		// (already filled, closed, or the joker rule forces the matching upper box).
 		int Preview(int a_category, const int (&a_dice)[5]) const;
 		// Writes the roll into a box. Returns the points scored (box plus any five-of-a-kind bonus), or -1 if not allowed.
 		int Fill(int a_category, const int (&a_dice)[5]);
