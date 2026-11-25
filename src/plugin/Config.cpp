@@ -61,6 +61,7 @@ namespace Config
 		put("Play", "UiScale", f(v.uiScale));
 		put("Play", "Volume", f(v.volume));
 		put("Play", "PauseGame", v.pauseGame ? "1" : "0");
+		put("Play", "CupGathersDice", v.cupGathersDice ? "1" : "0");
 		put("Play", "MusicVolume", f(v.musicVolume));
 		put("Play", "ShoutVolume", f(v.shoutVolume));
 		put("Play", "EffectsVolume", f(v.effectsVolume));
@@ -95,6 +96,7 @@ namespace Config
 		v.uiScale = std::clamp(Float("Play", "UiScale", v.uiScale), 0.5f, 2.0f);
 		v.volume = std::clamp(Float("Play", "Volume", v.volume), 0.0f, 2.0f);
 		v.pauseGame = Bool("Play", "PauseGame", v.pauseGame);
+		v.cupGathersDice = Bool("Play", "CupGathersDice", v.cupGathersDice);
 		v.musicVolume = std::clamp(Float("Play", "MusicVolume", v.musicVolume), 0.0f, 1.0f);
 		v.shoutVolume = std::clamp(Float("Play", "ShoutVolume", v.shoutVolume), 0.0f, 2.0f);
 		v.effectsVolume = std::clamp(Float("Play", "EffectsVolume", v.effectsVolume), 0.0f, 2.0f);

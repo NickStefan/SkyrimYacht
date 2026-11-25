@@ -99,6 +99,8 @@ namespace Menu
 			Hint("The table's scorecards, buttons and text. Changes at once.");
 			Changed(UI::Checkbox("Pause the world while playing", &v.pauseGame));
 			Hint("In the room only (the other ways always pause).");
+			Changed(UI::Checkbox("The cup gathers the dice", &v.cupGathersDice));
+			Hint("After a roll, clicking or shaking the cup first puts the dice you didn't keep back in it.");
 			SaveRow();
 		}
 

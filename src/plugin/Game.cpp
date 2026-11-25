@@ -545,6 +545,33 @@ namespace Game
 			g_sim.AddToCup(i);
 			Hit(3, 32, i, true, g_cups[0].p.x);  // into the cup
 		}
+		// CupGathersDice: the dice left on the pad go back into the cup, the nearest first, each with a knock as it lands.
+		bool GatherDice()
+		{
+			if (!Config::Get().cupGathersDice || g_turn != 0 || g_phase != Phase::Choose || g_rollsUsed >= 3 || g_carry.die >= 0) {
+				return false;
+			}
+			int order[5], n = 0;
+			for (int i = 0; i < 5; ++i) {
+				if (Active(i) && !InCup(i)) {
+					order[n++] = i;
+				}
+			}
+			if (n == 0) {
+				return false;
+			}
+			const auto& c = g_cups[g_turn];
+			auto        dist = [&](int i) { return std::hypot(g_sim.DieAt(i).pos.x - c.p.x, g_sim.DieAt(i).pos.y - c.p.y); };
+			std::sort(order, order + n, [&](int a, int b) { return dist(a) < dist(b); });
+			for (int k = 0; k < n; ++k) {
+				const int    i = order[k];
+				const double dur = 0.22 + k * 0.05;
+				TweenFrom(i, dur, 2.0);
+				g_sim.AddToCup(i);
+				g_later.push_back({ Audio::Now() + dur, 3, i, 32 });
+			}
+			return true;
+		}
 		std::pair<double, double> FrontSpot(int i)
 		{
 			if (g_lastSpot[i]) {
@@ -1087,6 +1114,8 @@ namespace Game
 					if (press.cup) {
 						if (press.moved && g_phase == Phase::Shaking) {
 							g_pourPending = true;
+						} else if (!press.moved && OverCup(p.x, p.y)) {
+							GatherDice();
 						}
 						continue;
 					}
@@ -1125,6 +1154,7 @@ namespace Game
 			if (g_press.cup) {
 				if (!g_press.moved && dist > 10) {
 					g_press.moved = true;
+					GatherDice();
 					if (DiceOnPad()) {
 						Toast("Put the dice on the pad in the cup or on the rack first");
 					} else if (!AnyInCup()) {
@@ -1980,8 +2010,9 @@ namespace Game
 			} else if (g_phase == Phase::Redo) {
 				hint = "Off the table. Throw again.";
 			} else if (g_phase == Phase::Choose) {
-				hint = g_rollsUsed < 3 ? "Click a die to keep it. Drag dice into the cup to roll again, or pick a box on your card."
-				                       : "No rolls left. Pick a box on your card.";
+				hint = g_rollsUsed >= 3                ? "No rolls left. Pick a box on your card."
+				       : Config::Get().cupGathersDice ? "Click a die to keep it. Click or shake the cup to roll the rest again, or pick a box on your card."
+				                                      : "Click a die to keep it. Drag dice into the cup to roll again, or pick a box on your card.";
 			}
 			if (hint.empty()) {
 				return;
