@@ -2,6 +2,8 @@
 // Copyright (C) 2026 evodube. GPL-3.0 (LICENSE.txt).
 #include "Config.h"
 
+#include <sstream>
+
 namespace Config
 {
 	namespace
@@ -96,6 +98,21 @@ namespace Config
 		v.uiScale = std::clamp(Float("Play", "UiScale", v.uiScale), 0.5f, 2.0f);
 		v.volume = std::clamp(Float("Play", "Volume", v.volume), 0.0f, 2.0f);
 		v.pauseGame = Bool("Play", "PauseGame", v.pauseGame);
+		{
+			std::vector<int> choices;
+			auto             list = Str("Play", "RoundChoices", "");
+			std::replace(list.begin(), list.end(), ',', ' ');
+			std::istringstream in(list);
+			for (int n = 0; in >> n;) {
+				if (n >= 1 && n <= 13 && std::find(choices.begin(), choices.end(), n) == choices.end()) {
+					choices.push_back(n);
+				}
+			}
+			std::sort(choices.begin(), choices.end());
+			if (!choices.empty()) {
+				v.roundChoices = std::move(choices);
+			}
+		}
 		v.cupGathersDice = Bool("Play", "CupGathersDice", v.cupGathersDice);
 		v.musicVolume = std::clamp(Float("Play", "MusicVolume", v.musicVolume), 0.0f, 1.0f);
 		v.shoutVolume = std::clamp(Float("Play", "ShoutVolume", v.shoutVolume), 0.0f, 2.0f);

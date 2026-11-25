@@ -188,6 +188,7 @@ namespace Game
 		ImVec2          g_soundKey{};         // that key's top middle, to hang the panel from
 		double          g_fillAt[2][yacht::kCategories]{};  // when each box was written in (the ink runs in)
 		double          g_turnAt = 0;        // when the turn changed (the compass label settles)
+		int             g_rounds = yacht::kCategories;  // this game's length, fixed when the bet is placed
 
 		// remembered in the save
 		std::unordered_map<RE::FormID, Record> g_records;
@@ -197,6 +198,7 @@ namespace Game
 		int g_games = 0;                // games finished (the innkeepers' line shows after the first)
 		std::uint32_t g_ownedDice = 1;  // bit per set in kDiceSets; bone is always yours
 		std::string   g_cupSel, g_diceSel;  // what you chose to play with ("" = the best you have)
+		int           g_roundsSel = yacht::kCategories;  // the game length you chose last
 
 		// UI -> game
 		enum class UiAct
@@ -211,6 +213,7 @@ namespace Game
 			Shout,
 			ChooseCup,
 			ChooseDice,
+			ChooseRounds,
 			BuyDice,
 			CloseShop
 		};
@@ -671,6 +674,30 @@ namespace Game
 		}
 
 		// ---------------------------------------------------------------- game over and the wager
+		int BoxesFilled(const yacht::Scorecard& a_card)
+		{
+			int n = 0;
+			for (int k = 0; k < yacht::kCategories; ++k) {
+				n += a_card.Filled(k) ? 1 : 0;
+			}
+			return n;
+		}
+		// Both players have scored this game's rounds (a full card in the whole game)
+		bool GameDone() { return BoxesFilled(g_cards[0]) >= g_rounds && BoxesFilled(g_cards[1]) >= g_rounds; }
+		// The INI's choice nearest the one you made last (the list may have changed since)
+		int RoundChoice()
+		{
+			const auto& choices = Config::Get().roundChoices;
+			int         best = 0;
+			for (int k = 0; k < static_cast<int>(choices.size()); ++k) {
+				if (std::abs(choices[k] - g_roundsSel) < std::abs(choices[best] - g_roundsSel)) {
+					best = k;
+				}
+			}
+			return best;
+		}
+		int Rounds() { return Config::Get().roundChoices[RoundChoice()]; }
+
 		void Settle(const std::string& a_outcome)
 		{
 			const int mine = g_cards[0].Total(), theirs = g_cards[1].Total();
@@ -725,6 +752,7 @@ namespace Game
 		{
 			g_cards[0].Clear();
 			g_cards[1].Clear();
+			g_rounds = Rounds();
 			g_outcome.clear();
 			g_confirmForfeit = false;
 			Scene::UseCup(0, PlayerCup().id);
@@ -841,7 +869,7 @@ namespace Game
 				break;
 			case NpcStep::Done:
 				if (g_npc.t > 1.6) {
-					if (g_cards[0].Full() && g_cards[1].Full()) {
+					if (GameDone()) {
 						Settle("");
 					} else {
 						StartTurn(0);
@@ -1217,7 +1245,7 @@ namespace Game
 						g_bet = bet;
 						g_betHeld = bet;
 						Ui("coins", 0.7f);
-						spdlog::info("Wager {} against {}", bet, g_oppName);
+						spdlog::info("Wager {} against {}, {} rounds", bet, g_oppName, Rounds());
 						Scene::Reveal();
 						NewGame();
 					}
@@ -1259,6 +1287,12 @@ namespace Game
 						Scene::UseDice(PlayerDice());
 						g_soundSet = PlayerDice();
 						Ui("ui_equip");
+					}
+					break;
+				case UiAct::ChooseRounds:
+					if (g_phase == Phase::Wager && arg >= 0 && arg < static_cast<int>(Config::Get().roundChoices.size())) {
+						g_roundsSel = Config::Get().roundChoices[arg];
+						Ui("ui_select");
 					}
 					break;
 				case UiAct::BuyDice:
@@ -1416,7 +1450,7 @@ namespace Game
 			} else if (g_phase == Phase::Scored && g_turn == 0) {
 				g_scoredTime += dt;
 				if (g_scoredTime > 0.9) {
-					if (g_cards[0].Full() && g_cards[1].Full()) {
+					if (GameDone()) {
 						Settle("");
 					} else {
 						StartTurn(1);
@@ -1928,6 +1962,12 @@ namespace Game
 			const float       ease = 1.0f - std::pow(1.0f - k, 3.0f);
 			const float       track = 0.7f - (0.7f - 0.32f) * ease;
 			TextC(dl, F.turn, cx, a.y + (th - F.turn->FontSize) * 0.5f, Alpha(g_turn == 0 || over ? kWhite : IM_COL32(217, 196, 187, 255), ease), t, track, 0.9f);
+			// the round, opposite the rolls
+			if (!over) {
+				const int round = (std::min)(g_rounds, BoxesFilled(g_cards[g_turn]) + 1);
+				Text(dl, F.tiny, ImVec2(a.x + S(22), a.y + (th - F.tiny->FontSize) * 0.5f), Alpha(kWhite, 0.85f),
+					Upper(fmt::format("Round {} of {}", round, g_rounds)), 0.22f);
+			}
 			// the rolls
 			for (int r = 0; r < 3; ++r) {
 				const ImVec2 c(b.x - S(22) - S(5.6f) - (2 - r) * S(17), a.y + th * 0.5f);
@@ -2525,7 +2565,7 @@ namespace Game
 			const float W = io.DisplaySize.x, H = io.DisplaySize.y, cx = W * 0.5f;
 			auto*       bg = ImGui::GetBackgroundDrawList();
 			Vignette(bg, W, H, 0.5f);
-			const float w = S(720), h = S(560), x = cx - w * 0.5f, y = H * 0.44f - h * 0.5f;
+			const float w = S(720), h = S(600), x = cx - w * 0.5f, y = H * 0.44f - h * 0.5f;
 			BeginArea("##wager", ImVec2(x, y), ImVec2(w, h));
 			auto*       dl = ImGui::GetWindowDrawList();
 			const auto& cfg = Config::Get();
@@ -2572,6 +2612,10 @@ namespace Game
 			yy += S(40);
 			const int diceIdx = (std::max)(0, DiceIndex(PlayerDice()));
 			Chooser(dl, "dice", cx, yy, S(520), "DICE", kDiceInfo[diceIdx].name, diceIdx, 15, [](int k) { return DiceOwned(k); }, UiAct::ChooseDice);
+			yy += S(40);
+			const int rounds = Rounds();
+			Chooser(dl, "rounds", cx, yy, S(520), "ROUNDS", rounds >= yacht::kCategories ? fmt::format("All {}", rounds) : fmt::format("{}", rounds),
+				RoundChoice(), static_cast<int>(cfg.roundChoices.size()), [](int) { return true; }, UiAct::ChooseRounds);
 			yy += S(40);
 			// the item card: what these dice are
 			FadeRule(dl, cx - S(260), cx + S(260), yy);
@@ -3465,7 +3509,7 @@ namespace Game
 	void Save(SKSE::SerializationInterface* a_intfc)
 	{
 		std::lock_guard lk(g_mtx);
-		if (!a_intfc->OpenRecord('YREC', 2)) {
+		if (!a_intfc->OpenRecord('YREC', 3)) {
 			return;
 		}
 		const std::uint32_t n = static_cast<std::uint32_t>(g_records.size());
@@ -3489,6 +3533,8 @@ namespace Game
 				a_intfc->WriteRecordData(str->data(), len);
 			}
 		}
+		// version 3: the game length
+		a_intfc->WriteRecordData(g_roundsSel);
 	}
 
 	void Load(SKSE::SerializationInterface* a_intfc)
@@ -3527,6 +3573,9 @@ namespace Game
 						a_intfc->ReadRecordData(str->data(), (std::min)(len, 64u));
 					}
 				}
+				if (version >= 3) {
+					a_intfc->ReadRecordData(g_roundsSel);
+				}
 			} else {
 				// saves from the test builds: the sets you'd already been given, and your last score as your best
 				g_bestScore = g_lastScore;
@@ -3551,5 +3600,6 @@ namespace Game
 		g_ownedDice = 1;
 		g_cupSel.clear();
 		g_diceSel.clear();
+		g_roundsSel = yacht::kCategories;
 	}
 }
