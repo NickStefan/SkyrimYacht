@@ -29,8 +29,8 @@ namespace Config
 		float effectsVolume = 1.0f; // the rest: menu clicks, coins, the quill
 		float musicVolume = 0.3f;   // the tavern music at the table (0 = none)
 		bool  pauseGame = false;    // pause the world while you play (the world table only draws while it runs)
-		std::vector<int> roundChoices{ 4, 6, 13 };  // game lengths the wager offers: boxes each player scores (13: the whole card)
-		bool  cupGathersDice = false;  // after a roll, clicking or shaking the cup first puts the dice you didn't keep back in
+		std::vector<int> roundChoices{ 1, 4, 13 };  // game lengths the wager offers: boxes each player scores (13: the whole card)
+		bool  cupGathersDice = true;   // after a roll, clicking or shaking the cup first puts the dice you didn't keep back in
 
 		// Diagnostics
 		bool debugOverlay = false;  // draws the projected tray outline over the 3D, to check picking
