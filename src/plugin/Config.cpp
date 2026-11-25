@@ -64,6 +64,7 @@ namespace Config
 		put("Play", "Volume", f(v.volume));
 		put("Play", "PauseGame", v.pauseGame ? "1" : "0");
 		put("Play", "CupGathersDice", v.cupGathersDice ? "1" : "0");
+		put("Play", "AllDiceForSale", v.allDiceForSale ? "1" : "0");
 		put("Play", "MusicVolume", f(v.musicVolume));
 		put("Play", "ShoutVolume", f(v.shoutVolume));
 		put("Play", "EffectsVolume", f(v.effectsVolume));
@@ -114,6 +115,7 @@ namespace Config
 			}
 		}
 		v.cupGathersDice = Bool("Play", "CupGathersDice", v.cupGathersDice);
+		v.allDiceForSale = Bool("Play", "AllDiceForSale", v.allDiceForSale);
 		v.musicVolume = std::clamp(Float("Play", "MusicVolume", v.musicVolume), 0.0f, 1.0f);
 		v.shoutVolume = std::clamp(Float("Play", "ShoutVolume", v.shoutVolume), 0.0f, 2.0f);
 		v.effectsVolume = std::clamp(Float("Play", "EffectsVolume", v.effectsVolume), 0.0f, 2.0f);

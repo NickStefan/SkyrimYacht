@@ -415,7 +415,7 @@ namespace Game
 		// a cup is yours to play with while you carry one (the plain tankard always is)
 		bool CupUnlocked(int k) { return k == 0 || (k > 0 && k < kNumCups && Scene::OwnsCup(kCups[k].id)); }
 		bool DiceOwned(int k) { return k >= 0 && k < 15 && (k == 0 || (g_ownedDice >> k) & 1u); }
-		bool DiceOnSale(int k) { return k > 0 && k < 15 && !DiceOwned(k) && g_totalWins >= kDiceInfo[k].wins; }
+		bool DiceOnSale(int k) { return k > 0 && k < 15 && !DiceOwned(k) && (Config::Get().allDiceForSale || g_totalWins >= kDiceInfo[k].wins); }
 		int  DiceIndex(const std::string& a_set)
 		{
 			for (int k = 0; k < 15; ++k) {
@@ -2926,12 +2926,26 @@ namespace Game
 					}
 				}
 			}
+			// AllDiceForSale: a few sets drawn from the plugin's list, afresh at each restock; otherwise one of each,
+			// shown as your wins reach them (HideUnsold)
+			auto* stock = Config::Get().allDiceForSale ?
+			                  RE::TESDataHandler::GetSingleton()->LookupForm<RE::TESLevItem>(EspIds::kDiceForSale, EspIds::kPlugin) :
+			                  nullptr;
 			for (auto* cont : chests) {
+				if (stock) {
+					if (cont->GetObjectCount(stock) == 0) {
+						cont->AddObjectToContainer(stock, EspIds::kDiceInStock, nullptr);
+					}
+					continue;
+				}
 				for (int k = 1; k < 15; ++k) {
 					if (g_diceItem[k] && cont->GetObjectCount(g_diceItem[k]) == 0) {
 						cont->AddObjectToContainer(g_diceItem[k], 1, nullptr);
 					}
 				}
+			}
+			if (Config::Get().allDiceForSale && !stock) {
+				spdlog::error("Dice: YA_DiceForSale missing from {}: no dice in the shops", EspIds::kPlugin);
 			}
 			int added = 0;
 			for (auto* list : lists) {
@@ -2940,8 +2954,8 @@ namespace Game
 					++added;
 				}
 			}
-			spdlog::info("Dice: in {} innkeepers' shop chests; their keyword added to {} buy/sell lists ({} shops deal in anything)",
-				chests.size(), added, everything);
+			spdlog::info("Dice: in {} innkeepers' shop chests ({}); their keyword added to {} buy/sell lists ({} shops deal in anything)",
+				chests.size(), stock ? fmt::format("{} drawn from the list", EspIds::kDiceInStock) : "every set", added, everything);
 		}
 
 		// Other mods hand out keywords by name (KID): "Dragonbone" picked up a dragon-bone icon. What they give every set

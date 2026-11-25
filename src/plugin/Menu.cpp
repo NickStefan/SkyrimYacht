@@ -101,6 +101,8 @@ namespace Menu
 			Hint("In the room only (the other ways always pause).");
 			Changed(UI::Checkbox("The cup gathers the dice", &v.cupGathersDice));
 			Hint("After a roll, clicking or shaking the cup first puts the dice you didn't keep back in it.");
+			Changed(UI::Checkbox("Every dice set for sale", &v.allDiceForSale));
+			Hint("Innkeepers stock two sets at a time, any of them, not one more every ten wins. Takes effect the next time the game starts.");
 			SaveRow();
 		}
 

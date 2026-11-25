@@ -35,5 +35,7 @@ namespace EspIds
 	inline constexpr RE::FormID kVoicesVanilla = 0x820;
 	inline constexpr RE::FormID kVoicesArgue = 0x821;
 	inline constexpr RE::FormID kVoicesTalkedInto = 0x822;
+	inline constexpr RE::FormID kDiceForSale = 0x823;
 	inline constexpr int kMinBet = 25;
+	inline constexpr int kDiceInStock = 2;
 }

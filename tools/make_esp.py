@@ -36,7 +36,8 @@ for _k, (_name, _gold) in enumerate(DICE):
 # Shops only show the goods their buy/sell list names: the DLL adds this keyword to the innkeepers' lists
 IDS["VendorItemDice"] = 0x80D + len(DICE)
 IDS.update({"InfoPlayOfCourse": 0x81C, "InfoPlayArgue": 0x81D, "InfoPlayTalkedInto": 0x81E, "InfoPoorNah": 0x81F,
-            "VoicesVanilla": 0x820, "VoicesArgue": 0x821, "VoicesTalkedInto": 0x822})
+            "VoicesVanilla": 0x820, "VoicesArgue": 0x821, "VoicesTalkedInto": 0x822, "DiceForSale": 0x823})
+DICE_IN_STOCK = 2  # AllDiceForSale: the DLL puts the list in the innkeepers' chests this many times (each its own draw)
 
 # Skyrim.esm's generic voice types: each has every line below recorded (Skyrim - Voices_en0.bsa), except where
 # LINES says otherwise
@@ -177,9 +178,16 @@ def main():
                     sub("FULL", zstr(f"{name} Dice")) + sub("MODL", zstr(f"SkyrimYacht\\DiceSet_{name.lower()}.nif")) +
                     sub("KSIZ", u32(2)) + sub("KWDA", u32(fid("VendorItemDice")) + u32(VENDOR_CLUTTER)) + sub("DATA", i32(gold) + f32(0.5)))
     kywd = rec("KYWD", "VendorItemDice", sub("EDID", zstr("YA_VendorItemDice")))
-    body = (group("KYWD", kywd) + group("GLOB", glob) + group("FACT", faction) + group("MISC", misc) + group("FLST", flst) +
-            group("DIAL", dial) + group("QUST", quest) + group("DLBR", branch))
-    groups = 8
+    # every set but bone, one drawn at random per item of the count (LVLF: all levels 0x1, each item in count 0x2)
+    lvli = sub("EDID", zstr("YA_DiceForSale")) + sub("OBND", b"\0" * 12) + sub("LVLD", u8(0)) + sub("LVLF", u8(0x1 | 0x2))
+    lvli += sub("LLCT", u8(len(DICE)))
+    for name, _ in DICE:
+        lvli += sub("LVLO", u16(1) + u16(0) + u32(fid(f"Dice{name}")) + u16(1) + u16(0))
+    lvli = rec("LVLI", "DiceForSale", lvli)
+
+    body = (group("KYWD", kywd) + group("GLOB", glob) + group("FACT", faction) + group("MISC", misc) + group("LVLI", lvli) +
+            group("FLST", flst) + group("DIAL", dial) + group("QUST", quest) + group("DLBR", branch))
+    groups = 9
     hedr = struct.pack("<fiI", 1.70, COUNT + groups, max(IDS.values()) + 1)
     tes4 = (sub("HEDR", hedr) + sub("CNAM", zstr("evodube")) +
             sub("SNAM", zstr("Yacht - a dice game you play with seated NPCs (needs SkyrimYacht.dll)")) +
@@ -195,7 +203,7 @@ def main():
          "namespace EspIds", "{", '\tinline constexpr const char* kPlugin = "SkyrimYacht.esp";']
     for k, v in IDS.items():
         L.append(f"\tinline constexpr RE::FormID k{k} = 0x{v:X};")
-    L += [f"\tinline constexpr int kMinBet = {MIN_BET};", "}", ""]
+    L += [f"\tinline constexpr int kMinBet = {MIN_BET};", f"\tinline constexpr int kDiceInStock = {DICE_IN_STOCK};", "}", ""]
     open(os.path.join(ROOT, "src", "plugin", "EspIds.h"), "w").write("\n".join(L))
     print(f"wrote SkyrimYacht.esp ({len(esp)} bytes, {COUNT} records) and src/plugin/EspIds.h")
 
