@@ -42,8 +42,11 @@ every frame, so dice can't be flung off the table or wedge in level geometry.
 
 - **Who plays:** anyone sitting near a table. Every second the DLL puts seated NPCs within `TableReach` of a table
   (any reference whose mesh path has "table" in it) into the hidden faction `YA_TableFaction`, and takes them out
-  again when they get up; the topic "Care for a Yacht game?" only shows for them. If you carry less than 25
-  septims they turn you away. When their "Pull up a chair" line ends, the table opens.
+  again when they get up; the topic "Care for a Yacht game?" only shows for them. They answer in the game's own
+  recorded lines ("Of course.", "How can I argue with that?", "Okay, okay. You've talked me into it."), shared from
+  Skyrim.esm's generic dialogue, so nothing of Bethesda's ships; a voice type without them (DLC, unique or added by
+  a mod) says "Pull up a chair. Let's see your coin." silently. If you carry less than the smallest wager they turn
+  you away ("Nah. I don't think so.", and a notice says how much it takes). When their yes ends, the table opens.
 - **The wager comes first:** 25 to 100 septims (`SkyrimYacht.ini`), taken when you place it. A win pays double, a
   draw gives it back, a loss or a forfeit keeps it. Leaving before the bet costs nothing.
 - **The table:** a menu that pauses the game and blurs the world (`kPausesGame`, `UIBlurManager`). The tray

@@ -28,5 +28,12 @@ namespace EspIds
 	inline constexpr RE::FormID kDiceDragonbone = 0x819;
 	inline constexpr RE::FormID kDiceDaedric = 0x81A;
 	inline constexpr RE::FormID kVendorItemDice = 0x81B;
+	inline constexpr RE::FormID kInfoPlayOfCourse = 0x81C;
+	inline constexpr RE::FormID kInfoPlayArgue = 0x81D;
+	inline constexpr RE::FormID kInfoPlayTalkedInto = 0x81E;
+	inline constexpr RE::FormID kInfoPoorNah = 0x81F;
+	inline constexpr RE::FormID kVoicesVanilla = 0x820;
+	inline constexpr RE::FormID kVoicesArgue = 0x821;
+	inline constexpr RE::FormID kVoicesTalkedInto = 0x822;
 	inline constexpr int kMinBet = 25;
 }

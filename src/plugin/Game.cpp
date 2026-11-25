@@ -228,8 +228,14 @@ namespace Game
 		// forms
 		RE::TESFaction*  g_faction = nullptr;
 		RE::TESGlobal*   g_canAfford = nullptr;
-		RE::FormID       g_infoPlay = 0;
+		RE::FormID       g_infoPlay = 0;            // yes, in our own words (silent: a voice that has none of the game's)
+		RE::FormID       g_infoPlayVoiced[3]{};     // yes, in the game's own voiced lines
+		RE::FormID       g_infoPoorVoiced = 0;      // no, voiced: it doesn't say how much it takes, so we do
 		RE::FormID       g_infoDiceSale = 0;
+		bool             IsPlayInfo(RE::FormID a_id)
+		{
+			return a_id && (a_id == g_infoPlay || std::ranges::find(g_infoPlayVoiced, a_id) != std::end(g_infoPlayVoiced));
+		}
 		RE::TESObjectMISC* g_diceItem[15]{};  // the sets as items in the innkeepers' shops (1..14; bone is everyone's)
 		RE::TESFaction*    g_innkeeper = nullptr;
 		std::string      g_shopName;
@@ -1660,8 +1666,13 @@ namespace Game
 		public:
 			RE::BSEventNotifyControl ProcessEvent(const RE::TESTopicInfoEvent* e, RE::BSTEventSource<RE::TESTopicInfoEvent>*) override
 			{
-				if (e && e->type.get() == RE::TESTopicInfoEvent::TopicInfoEventType::kTopicEnd && g_infoPlay && e->topicInfoFormID == g_infoPlay && e->speakerRef) {
+				if (e && e->type.get() == RE::TESTopicInfoEvent::TopicInfoEventType::kTopicEnd && IsPlayInfo(e->topicInfoFormID) && e->speakerRef) {
 					g_pendingSpeaker = e->speakerRef->GetFormID();
+				}
+				if (e && e->type.get() == RE::TESTopicInfoEvent::TopicInfoEventType::kTopicBegin && g_infoPoorVoiced && e->topicInfoFormID == g_infoPoorVoiced) {
+					SKSE::GetTaskInterface()->AddTask([]() {
+						RE::SendHUDMessage::ShowHUDMessage(fmt::format("Yacht: you need at least {} septims to play.", Config::Get().minBet).c_str());
+					});
 				}
 				return RE::BSEventNotifyControl::kContinue;
 			}
@@ -3062,6 +3073,10 @@ namespace Game
 		g_faction = dh->LookupForm<RE::TESFaction>(EspIds::kTableFaction, EspIds::kPlugin);
 		g_canAfford = dh->LookupForm<RE::TESGlobal>(EspIds::kCanAfford, EspIds::kPlugin);
 		g_infoPlay = dh->LookupFormID(EspIds::kInfoPlay, EspIds::kPlugin);
+		g_infoPlayVoiced[0] = dh->LookupFormID(EspIds::kInfoPlayOfCourse, EspIds::kPlugin);
+		g_infoPlayVoiced[1] = dh->LookupFormID(EspIds::kInfoPlayArgue, EspIds::kPlugin);
+		g_infoPlayVoiced[2] = dh->LookupFormID(EspIds::kInfoPlayTalkedInto, EspIds::kPlugin);
+		g_infoPoorVoiced = dh->LookupFormID(EspIds::kInfoPoorNah, EspIds::kPlugin);
 		g_innkeeper = RE::TESForm::LookupByID<RE::TESFaction>(0x0005091B);  // JobInnkeeperFaction
 		{
 			int found = 0;
@@ -3173,11 +3188,11 @@ namespace Game
 		if (!ui) {
 			return;
 		}
-		// the opponent said yes ("Pull up a chair..."): note who, while the line is being spoken
+		// the opponent said yes ("Of course.", "Pull up a chair..."): note who, while the line is being spoken
 		if (ui->IsMenuOpen(RE::DialogueMenu::MENU_NAME)) {
 			auto* mtm = RE::MenuTopicManager::GetSingleton();
 			auto* info = mtm ? mtm->currentTopicInfo : nullptr;
-			if (info && g_infoPlay && info->GetFormID() == g_infoPlay && !g_pendingSpeaker.load()) {
+			if (info && IsPlayInfo(info->GetFormID()) && !g_pendingSpeaker.load()) {
 				auto ref = mtm->speaker.get();
 				if (ref) {
 					g_pendingSpeaker = ref->GetFormID();
